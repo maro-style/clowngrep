@@ -23,7 +23,7 @@ TEXT_BLOCK_EXTS = {"txt", "log"}
 DOMAIN_TOKEN_RE = re.compile(r"(?i)(?:[a-z0-9-]+\.)+[a-z0-9-]{2,63}")
 MAX_PATH_COMPONENT = 100
 MAX_OPEN_OUTPUT_FILES = 64
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
     *(f"COM{i}" for i in range(1, 10)),
@@ -206,14 +206,19 @@ def load_clienti_csv(csv_path: Path):
             else:
                 owner = ("client", customer, None)
 
-            previous = domain_map.get(value)
-            if previous is not None and previous != owner:
-                raise RuntimeError(
-                    f"Riga {row_no}: il dominio {value!r} e' associato a piu' proprietari: "
-                    f"{previous} e {owner}"
-                )
+            owners = domain_map.setdefault(value, set())
+            if owner in owners:
+                # Riga duplicata identica: non aggiunge una seconda relazione.
+                domains.add(value)
+                continue
 
-            domain_map[value] = owner
+            # Modello molti-a-molti: ogni riga valida rappresenta una relazione
+            # indipendente. Lo stesso dominio puo' quindi essere associato a:
+            # - piu' clienti diretti;
+            # - piu' terze parti;
+            # - una combinazione di clienti diretti e terze parti.
+            # Il set evita solamente di duplicare una relazione identica.
+            owners.add(owner)
             domains.add(value)
 
     if not domain_map:
@@ -222,20 +227,47 @@ def load_clienti_csv(csv_path: Path):
     return domain_map, sorted(domains)
 
 
-def host_to_owner(host: str, domain_map: dict):
+def _owner_set(value):
+    """Normalize a domain-map value to a set of owner tuples.
+
+    ClownGrep 1.1 uses sets because a domain may map to multiple
+    third-party relationships and each third party may belong to multiple customers. The tuple fallback keeps compatibility with mappings
+    created by older code or external callers.
+    """
+    if value is None:
+        return set()
+    if isinstance(value, tuple) and len(value) == 3 and value[0] in {"client", "third_party"}:
+        return {value}
+    return set(value)
+
+
+def host_to_owners(host: str, domain_map: dict):
+    """Return all owner relationships matching a host or one of its parent domains."""
     host = (host or "").casefold().strip().strip(".")
     if not host:
-        return None
+        return set()
 
     if host in domain_map:
-        return domain_map[host]
+        return _owner_set(domain_map[host])
 
     parts = host.split(".")
     for i in range(1, len(parts) - 1):
         candidate = ".".join(parts[i:])
         if candidate in domain_map:
-            return domain_map[candidate]
+            return _owner_set(domain_map[candidate])
 
+    return set()
+
+
+def host_to_owner(host: str, domain_map: dict):
+    """Backward-compatible helper for domains with exactly one owner.
+
+    Returns the single owner when unambiguous, otherwise None. New code should
+    use host_to_owners() because third-party domains may map to multiple clients.
+    """
+    owners = host_to_owners(host, domain_map)
+    if len(owners) == 1:
+        return next(iter(owners))
     return None
 
 
@@ -719,8 +751,8 @@ def match_text(text: str, domain_map: dict):
     hit_owners = set()
     hit_domains = set()
     for token in tokens:
-        owner = host_to_owner(token, domain_map)
-        if owner:
+        owners = host_to_owners(token, domain_map)
+        for owner in owners:
             hit_owners.add(owner)
             hit_domains.add((token, owner))
     return hit_owners, hit_domains
@@ -1063,8 +1095,10 @@ def main():
             print(f"[ERRORE] {exc}")
             sys.exit(1)
 
+    relation_count = sum(len(owners) for owners in domain_map.values())
     print(f"Motore ricerca: {engine}")
     print(f"Domini caricati: {len(domains)}")
+    print(f"Relazioni dominio-owner: {relation_count}")
     print(f"File da processare: {len(files)}")
     print("\n=== INIZIO DEL CIRCO ===")
 
