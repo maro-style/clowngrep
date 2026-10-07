@@ -208,16 +208,6 @@ git status
 
 Do not publish real customer mappings, raw leak material, credentials, PII, API keys or internal data in commits, issues or pull requests.
 
-## Tests
-
-Run:
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-The repository also includes a GitHub Actions workflow that compiles and tests ClownGrep on multiple Python versions.
-
 ## Security / scope
 
 ClownGrep is a local triage utility. It does not download data, authenticate to external services or perform exploitation. Use it only on data you are authorized to access and process.
