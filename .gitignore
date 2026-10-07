@@ -1,0 +1,17 @@
+# ClownGrep local/runtime data (repository root only)
+/file/*
+!/file/.gitkeep
+/outputs/
+/.clowngrep_venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
